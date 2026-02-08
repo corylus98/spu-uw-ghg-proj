@@ -12,9 +12,8 @@ This guide explains how to use the EcoMetrics Backend API, with detailed example
 2. [API Endpoints](#api-endpoints)
 3. [Column Mapping Rules (Detailed)](#column-mapping-rules-detailed)
 4. [Filter Configuration](#filter-configuration)
-5. [EF_ID Lookup Configuration](#efid-lookup-configuration)
-6. [Complete Request Examples](#complete-request-examples)
-7. [Error Handling](#error-handling)
+5. [Complete Request Examples](#complete-request-examples)
+6. [Error Handling](#error-handling)
 
 ---
 
@@ -886,26 +885,6 @@ Filters are applied to raw data **before** column mapping.
 | `not_in` | Not in list | array | `{"column": "Status", "operator": "not_in", "value": ["Deleted", "Archived"]}` |
 | `is_null` | Is null/empty | (none) | `{"column": "Notes", "operator": "is_null"}` |
 | `not_null` | Is not null | (none) | `{"column": "QTY_FUEL", "operator": "not_null"}` |
-
----
-
-## EF_ID Lookup Configuration
-
-Controls how emission factors are looked up from the EFID reference table.
-
-```json
-{
-  "efidLookup": {
-    "sectorFilter": "Fleet"
-  }
-}
-```
-
-| Property | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `sectorFilter` | No | (none) | Filter EFID table by sector before joining |
-
-**Note:** The `EF_ID` column itself is now defined in `columnMappings` (see [Pattern-Based Column Construction](#6-pattern-based-column-construction-pattern)). The `efidLookup` config only controls the emission factor join behavior.
 
 ---
 
