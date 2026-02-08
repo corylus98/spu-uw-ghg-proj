@@ -32,7 +32,7 @@ class ValidationService:
         column_mappings = config["columnMappings"]
 
         # Check required columns are mapped
-        required_cols = ["ACCT_ID", "Consumption", "Unit", "Subtype"]
+        required_cols = ["ACCT_ID", "Consumption", "Unit", "Subtype", "EF_ID"]
         for col in required_cols:
             if col not in column_mappings:
                 errors.append(f"Missing required column mapping: '{col}'")
@@ -121,6 +121,24 @@ class ValidationService:
                 ghg_types = mapping["ghgType"]
                 if not isinstance(ghg_types, list) or len(ghg_types) == 0:
                     errors.append("GHG mapping must have a non-empty list of 'ghgType'")
+
+            # Validate pattern-based column construction
+            elif "pattern" in mapping:
+                pattern = mapping["pattern"]
+                if not isinstance(pattern, str) or len(pattern) == 0:
+                    errors.append(f"Pattern mapping for '{target_col}' must have a non-empty 'pattern' string")
+                # Check that referenced columns in pattern exist
+                import re
+                placeholders = re.findall(r'\{(\w+)\}', pattern)
+                # GHG is a special system-generated column (created during GHG expansion)
+                system_generated_columns = {"GHG"}
+                for placeholder in placeholders:
+                    # Skip system-generated columns like GHG
+                    if placeholder in system_generated_columns:
+                        continue
+                    # Placeholder can reference either a source column or a target column (already mapped)
+                    if placeholder not in source_columns and placeholder not in column_mappings:
+                        warnings.append(f"Pattern placeholder '{{{placeholder}}}' in '{target_col}' - ensure this column exists or is mapped")
 
             else:
                 errors.append(f"Invalid mapping configuration for column: '{target_col}'")

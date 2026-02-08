@@ -213,14 +213,16 @@ class CalculationEngine:
         df_raw = StorageService.load_raw_data(source_id, config.get("sourceSheet"))
 
         # 2. Apply mappings (filter, map, expand, aggregate)
+        # EF_ID is now a required column mapping - no longer auto-constructed
         df_mapped = self.mapping_engine.process_mappings(df_raw, config)
 
-        # 3. Construct EF_ID
-        efid_config = config.get("efidLookup", {})
-        df_with_efid = self.construct_efid(df_mapped, efid_config)
+        # 3. Validate EF_ID column exists
+        if "EF_ID" not in df_mapped.columns:
+            raise ValueError("EF_ID column is missing. Ensure EF_ID is mapped in columnMappings.")
 
         # 4. Join emission factors
-        df_with_ef = self.join_emission_factors(df_with_efid, efid_config)
+        efid_config = config.get("efidLookup", {})
+        df_with_ef = self.join_emission_factors(df_mapped, efid_config)
 
         # 5. Join GWP values
         df_with_gwp = self.join_gwp(df_with_ef, gwp_version)

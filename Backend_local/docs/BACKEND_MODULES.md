@@ -114,10 +114,11 @@ Backend_local/
 | **MappingEngine** | Main class for data transformation |
 | `__init__()` | Initializes with empty reference table cache |
 | `apply_filters(df, filters)` | Applies filter conditions to DataFrame. Supports: `=`, `!=`, `>`, `>=`, `<`, `<=`, `in`, `not_in`, `is_null`, `not_null` |
-| `map_columns(df, column_mappings)` | Applies column mappings to create standard schema. Returns `(mapped_df, ghg_config)`. Supports 5 mapping types (see API Guide) |
+| `map_columns(df, column_mappings)` | Applies column mappings to create standard schema. Returns `(mapped_df, ghg_config, deferred_patterns)`. Patterns containing `{GHG}` are deferred. Supports 6 mapping types (see API Guide) |
+| `apply_deferred_patterns(df, deferred_patterns)` | Applies pattern-based columns that were deferred until after GHG expansion (patterns containing `{GHG}`) |
 | `expand_ghg_rows(df, ghg_config)` | Expands each row into multiple rows (one per GHG type). 1 row × 3 GHGs = 3 rows |
 | `aggregate_consumption(df)` | Groups by all dimension columns and sums Consumption |
-| `process_mappings(df, config)` | Full pipeline: filter → map → expand → aggregate |
+| `process_mappings(df, config)` | Full pipeline: filter → map → expand → apply deferred patterns → aggregate |
 | `clear_cache()` | Clears reference table cache |
 
 ---
@@ -130,11 +131,11 @@ Backend_local/
 | **CalculationEngine** | Main class for emissions calculation |
 | `__init__()` | Initializes with MappingEngine and empty reference tables |
 | `load_reference_tables()` | Loads EFID and GWP tables into memory |
-| `construct_efid(df, efid_config)` | Builds EF_ID column from pattern (e.g., `Fuel_{Subtype}_20XX_{GHG}`) |
+| `construct_efid(df, efid_config)` | (Legacy) Builds EF_ID column from pattern. Note: EF_ID is now a required user-provided column mapping |
 | `join_emission_factors(df, efid_config)` | Joins EFID table to get `GHG_MTperUnit`. Optionally filters by sector |
 | `join_gwp(df, gwp_version)` | Maps GHG names to GWP values (AR5 or AR4) |
 | `calculate_emissions(df)` | Calculates `mtCO2e_calc = Consumption × GHG_MTperUnit × GWP`. Adds `formulaReference` for transparency |
-| `process_source(source_id, config, gwp_version)` | Full pipeline for one source: load → map → construct EF_ID → join factors → calculate |
+| `process_source(source_id, config, gwp_version)` | Full pipeline for one source: load → map → validate EF_ID → join factors → calculate |
 | `calculate_for_session(session_id, source_ids, gwp_version)` | Processes multiple sources, saves results, updates session metadata. Returns calculation summary |
 
 ---
@@ -214,26 +215,33 @@ The full data processing flow:
    - Static values
    - Derived values (date extraction)
    - Reference table joins
+   - Pattern-based columns (non-GHG patterns processed here)
+   - Note: Patterns with {GHG} are DEFERRED to step 5
         ↓
 4. Expand GHG Rows (mapping_engine.py)
    - 1 row becomes N rows (one per GHG)
+   - Creates GHG column with values: CO2, CH4, N2O, etc.
         ↓
-5. Aggregate Consumption (mapping_engine.py)
+5. Apply Deferred Patterns (mapping_engine.py)
+   - Process patterns containing {GHG} placeholder
+   - EF_ID patterns like "Fuel_{Subtype}_20XX_{GHG}" applied here
+        ↓
+6. Aggregate Consumption (mapping_engine.py)
    - Group by dimensions, sum consumption
         ↓
-6. Construct EF_ID (calculation_engine.py)
-   - Build emission factor IDs from pattern
+7. Validate EF_ID (calculation_engine.py)
+   - Ensure EF_ID column exists from user mapping
         ↓
-7. Join Emission Factors (calculation_engine.py)
+8. Join Emission Factors (calculation_engine.py)
    - Look up GHG_MTperUnit from EFID table
         ↓
-8. Join GWP Values (calculation_engine.py)
+9. Join GWP Values (calculation_engine.py)
    - Look up Global Warming Potential
         ↓
-9. Calculate Emissions (calculation_engine.py)
-   - mtCO2e_calc = Consumption × GHG_MTperUnit × GWP
+10. Calculate Emissions (calculation_engine.py)
+    - mtCO2e_calc = Consumption × GHG_MTperUnit × GWP
         ↓
-10. Save to Parquet (storage.py)
+11. Save to Parquet (storage.py)
 ```
 
 ---

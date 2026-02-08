@@ -8,7 +8,7 @@ This guide explains how to use the EcoMetrics Backend API, with detailed example
 
 ## Table of Contents
 
-1. [Quick Start Workflow](#quick-start-workflow)
+1. [User Flow Overview](#user-flow-overview)
 2. [API Endpoints](#api-endpoints)
 3. [Column Mapping Rules (Detailed)](#column-mapping-rules-detailed)
 4. [Filter Configuration](#filter-configuration)
@@ -18,17 +18,205 @@ This guide explains how to use the EcoMetrics Backend API, with detailed example
 
 ---
 
-## Quick Start Workflow
+## User Flow Overview
+
+This section describes the typical user journey through the EcoMetrics system and which APIs to call at each step.
+
+### Flow Diagram
 
 ```
-1. GET /api/sources                              → List available source files
-2. GET /api/sources/{sourceId}/preview           → Preview columns and data
-3. POST /api/sessions                            → Create a new session
-4. POST /api/sessions/{id}/sources/{id}/config   → Save column mapping config
-5. POST /api/sessions/{id}/calculate             → Run emissions calculation
-6. GET /api/sessions/{id}/analytics/summary      → Get results summary
-7. POST /api/sessions/{id}/analytics/chart-data  → Get chart-ready data
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           FIRST-TIME USER FLOW                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐       │
+│  │ 1. Browse Source │───▶│ 2. Create        │───▶│ 3. Configure     │       │
+│  │    Files         │    │    Session       │    │    Mappings      │       │
+│  └──────────────────┘    └──────────────────┘    └──────────────────┘       │
+│          │                                                │                  │
+│          ▼                                                ▼                  │
+│  ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐       │
+│  │ Preview columns  │    │                  │    │ 4. Run           │       │
+│  │ & sample data    │    │                  │◀───│    Calculation   │       │
+│  └──────────────────┘    │                  │    └──────────────────┘       │
+│                          │                  │             │                  │
+│                          │  5. View Results │◀────────────┘                  │
+│                          │     & Charts     │                                │
+│                          └──────────────────┘                                │
+│                                                                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                           RETURNING USER FLOW                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────────────┐    ┌──────────────────┐                               │
+│  │ 6. List Existing │───▶│ View Saved       │                               │
+│  │    Sessions      │    │ Analytics        │                               │
+│  └──────────────────┘    └──────────────────┘                               │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+### Step 1: Browse Source Files (First-Time User)
+
+**Purpose:** User explores available data files to decide which to work with.
+
+| Action | API Endpoint | Description |
+|--------|--------------|-------------|
+| List all source files | `GET /api/sources` | Returns list of CSV/XLSX files in the data directory |
+| Preview a source file | `GET /api/sources/{sourceId}/preview` | Returns column metadata and first 10 rows |
+
+**Typical Frontend Flow:**
+1. Display list of available source files with file names and sizes
+2. When user clicks a file, show column names, data types, and sample values
+3. User decides which file(s) to use for emissions calculation
+
+---
+
+### Step 2: Create a Session
+
+**Purpose:** User creates a workspace to save their configuration and calculations.
+
+| Action | API Endpoint | Description |
+|--------|--------------|-------------|
+| Create new session | `POST /api/sessions` | Creates a session with name and description |
+
+**Request Body:**
+```json
+{
+  "name": "Q4 2022 Fleet Analysis",
+  "description": "Fleet fuel emissions for Q4 2022"
+}
+```
+
+**What happens:**
+- A unique `sessionId` is generated (e.g., `sess_a1b2c3`)
+- Session directory is created to store configs and results
+- Session appears in the session list for future access
+
+---
+
+### Step 3: Configure Column Mappings
+
+**Purpose:** User defines how source columns map to the standard emissions schema.
+
+| Action | API Endpoint | Description |
+|--------|--------------|-------------|
+| Save configuration | `POST /api/sessions/{sessionId}/sources/{sourceId}/config` | Validates and saves column mapping |
+| Get saved config | `GET /api/sessions/{sessionId}/sources/{sourceId}/config` | Retrieves previously saved config |
+
+**Frontend should provide UI for:**
+- Mapping source columns to required fields (ACCT_ID, Consumption, Unit, Subtype, Year, EF_ID)
+- Setting static values (e.g., Unit = "gal")
+- Configuring GHG expansion (CO2, CH4, N2O)
+- Building EF_ID patterns (e.g., `Fuel_{Subtype}_20XX_{GHG}`)
+- Adding filters to exclude certain rows
+- Joining with reference tables (e.g., LOB lookup)
+
+**See:** [Column Mapping Rules](#column-mapping-rules-detailed) for all mapping options.
+
+---
+
+### Step 4: Run Emissions Calculation
+
+**Purpose:** Execute the calculation pipeline to compute CO2-equivalent emissions.
+
+| Action | API Endpoint | Description |
+|--------|--------------|-------------|
+| Run calculation | `POST /api/sessions/{sessionId}/calculate` | Processes sources and calculates emissions |
+
+**Request Body:**
+```json
+{
+  "sources": ["fleetfuel_2019_2022"],
+  "gwpVersion": "AR5"
+}
+```
+
+**What happens internally:**
+1. Load raw data from source file
+2. Apply filters
+3. Map columns to standard schema
+4. Expand GHG rows (1 row → 3 rows for CO2/CH4/N2O)
+5. Apply deferred patterns (EF_ID with {GHG})
+6. Aggregate consumption
+7. Join emission factors from EFID table
+8. Join GWP values
+9. Calculate: `mtCO2e = Consumption × GHG_MTperUnit × GWP`
+10. Save results to Parquet file
+
+**Response includes:**
+- Calculation ID and timestamps
+- Row counts (input vs output)
+- Total mtCO2e for each source
+- Aggregated totals
+
+---
+
+### Step 5: View Analytics & Charts
+
+**Purpose:** Display calculation results in summary and chart formats.
+
+| Action | API Endpoint | Description |
+|--------|--------------|-------------|
+| Get summary | `GET /api/sessions/{sessionId}/analytics/summary` | Aggregated totals by sector, year, subtype, GHG |
+| Get chart data | `POST /api/sessions/{sessionId}/analytics/chart-data` | Chart-ready data (pie, bar, line, stacked_bar) |
+
+**Summary Response includes:**
+- Total mtCO2e across all sources
+- Breakdown by Sector, Year, Subtype, GHG
+- Year range
+
+**Chart Data Request:**
+```json
+{
+  "chartType": "pie",
+  "metric": "mtCO2e_calc",
+  "groupBy": "Subtype",
+  "filters": [{"column": "Year", "operator": "=", "value": 2022}]
+}
+```
+
+**Available chart types:** `pie`, `bar`, `line`, `stacked_bar`
+
+---
+
+### Step 6: Return to Existing Sessions (Returning User)
+
+**Purpose:** User returns to view or continue work on previous sessions.
+
+| Action | API Endpoint | Description |
+|--------|--------------|-------------|
+| List all sessions | `GET /api/sessions` | Returns all sessions with summary info |
+| Get session details | `GET /api/sessions/{sessionId}` | Full session metadata including sources and calculations |
+| View saved analytics | `GET /api/sessions/{sessionId}/analytics/summary` | Retrieve previously calculated results |
+| Delete session | `DELETE /api/sessions/{sessionId}` | Remove session and all associated data |
+
+**Session List Response includes:**
+- Session ID, name, description
+- Creation date
+- Number of sources configured
+- Whether calculations have been run
+- Total mtCO2e (if calculated)
+
+---
+
+### Quick Reference: API Endpoints by Step
+
+| Step | User Action | API Call |
+|------|-------------|----------|
+| 1a | Browse files | `GET /api/sources` |
+| 1b | Preview file | `GET /api/sources/{sourceId}/preview?sheet=Sheet1` |
+| 2 | Create session | `POST /api/sessions` |
+| 3a | Save config | `POST /api/sessions/{sessionId}/sources/{sourceId}/config` |
+| 3b | Get config | `GET /api/sessions/{sessionId}/sources/{sourceId}/config` |
+| 4 | Calculate | `POST /api/sessions/{sessionId}/calculate` |
+| 5a | View summary | `GET /api/sessions/{sessionId}/analytics/summary` |
+| 5b | Get chart | `POST /api/sessions/{sessionId}/analytics/chart-data` |
+| 6a | List sessions | `GET /api/sessions` |
+| 6b | Get session | `GET /api/sessions/{sessionId}` |
+| 6c | Delete session | `DELETE /api/sessions/{sessionId}` |
 
 ---
 
@@ -379,6 +567,7 @@ The `columnMappings` object defines how to transform source columns to the stand
 | `Consumption` | float | Activity quantity |
 | `Unit` | string | Unit of consumption |
 | `Subtype` | string | Fuel/utility type |
+| `EF_ID` | string | Emission factor identifier (direct or pattern-based) |
 | `GHG` | string | Greenhouse gas (use GHG expansion) |
 
 ### Mapping Rule Types
@@ -555,6 +744,108 @@ Expand each row into multiple rows, one per greenhouse gas.
 
 ---
 
+#### 6. Pattern-Based Column Construction (`pattern`)
+
+Construct a column value by combining multiple columns using a pattern template. This is especially useful for building `EF_ID` values.
+
+**Option A: Use existing source column directly**
+```json
+{
+  "columnMappings": {
+    "EF_ID": {
+      "sourceColumn": "EMISSION_FACTOR_ID"
+    }
+  }
+}
+```
+
+**Option B: Construct from pattern with placeholders**
+```json
+{
+  "columnMappings": {
+    "EF_ID": {
+      "pattern": "Fuel_{Subtype}_20XX_{GHG}"
+    }
+  }
+}
+```
+
+| Property | Required | Description |
+|----------|----------|-------------|
+| `pattern` | Yes | Template string with `{column_name}` placeholders |
+
+**How it works:**
+1. Placeholders like `{Subtype}` are replaced with values from that column
+2. Placeholders can reference source columns OR already-mapped target columns
+3. Pattern is applied row-by-row
+
+**Special Handling for `{GHG}` Placeholder:**
+
+The `{GHG}` placeholder is special because the GHG column doesn't exist in the source data—it's created by the system during GHG expansion. The backend automatically handles this:
+
+1. Patterns **without** `{GHG}` are processed immediately during column mapping
+2. Patterns **with** `{GHG}` are **deferred** until after GHG expansion
+3. Once GHG expansion creates rows with `GHG = "CO2"`, `"CH4"`, `"N2O"`, the deferred pattern is applied
+
+This means you can safely use `{GHG}` in your patterns even though the GHG column doesn't exist yet:
+
+```json
+{
+  "columnMappings": {
+    "GHG": {"ghgType": ["CO2", "CH4", "N2O"]},
+    "EF_ID": {"pattern": "Fuel_{Subtype}_20XX_{GHG}"}
+  }
+}
+```
+
+The system processes this as:
+1. First: Other columns mapped (Subtype, etc.)
+2. Then: GHG expansion creates 3 rows per input (one each for CO2, CH4, N2O)
+3. Finally: EF_ID pattern is applied using the now-available GHG values
+
+**Pattern Placeholder Examples:**
+
+| Placeholder | Source | Example Value |
+|-------------|--------|---------------|
+| `{Subtype}` | Mapped column | `Gasoline`, `Diesel`, `B20` |
+| `{GHG}` | From GHG expansion | `CO2`, `CH4`, `N2O` |
+| `{Year}` | Mapped column | `2022` |
+| `{Sector}` | Mapped column | `Fleet`, `Facilities` |
+| `{FUEL_TYPE}` | Source column | `Gasoline` |
+
+**Common EF_ID Patterns:**
+
+| Data Type | Pattern | Example Output |
+|-----------|---------|----------------|
+| Fleet Fuel | `Fuel_{Subtype}_20XX_{GHG}` | `Fuel_Gasoline_20XX_CO2` |
+| Electricity (PSE) | `Elec_PSE_{Year}_{GHG}` | `Elec_PSE_2022_CO2` |
+| Electricity (SCL) | `Elec_SCL_{Year}_{GHG}` | `Elec_SCL_2022_CO2` |
+| Natural Gas | `NG_{Subtype}_{GHG}` | `NG_Pipeline_CO2` |
+| Refrigerants | `FacAC_{Subtype}_20XX` | `FacAC_R-134A_20XX` |
+
+**Complete Example with EF_ID Pattern:**
+```json
+{
+  "columnMappings": {
+    "ACCT_ID": {"sourceColumn": "EQ_EQUIP_NO"},
+    "Consumption": {"sourceColumn": "QTY_FUEL"},
+    "Subtype": {"sourceColumn": "FUEL_TYPE"},
+    "Year": {"derivedFrom": "FTK_DATE", "extractType": "year"},
+    "Unit": {"staticValue": "gal"},
+    "Sector": {"staticValue": "Fleet"},
+    "GHG": {"ghgType": ["CO2", "CH4", "N2O"]},
+    "EF_ID": {"pattern": "Fuel_{Subtype}_20XX_{GHG}"}
+  }
+}
+```
+
+**Processing Order:**
+1. Direct mappings, static values, derived values are processed first
+2. GHG expansion creates rows with GHG column
+3. Pattern mappings are processed last (can reference mapped columns like `Subtype`, `GHG`)
+
+---
+
 ## Filter Configuration
 
 Filters are applied to raw data **before** column mapping.
@@ -600,13 +891,11 @@ Filters are applied to raw data **before** column mapping.
 
 ## EF_ID Lookup Configuration
 
-Controls how emission factor IDs are constructed and looked up.
+Controls how emission factors are looked up from the EFID reference table.
 
 ```json
 {
   "efidLookup": {
-    "strategy": "auto",
-    "pattern": "Fuel_{Subtype}_20XX_{GHG}",
     "sectorFilter": "Fleet"
   }
 }
@@ -614,34 +903,15 @@ Controls how emission factor IDs are constructed and looked up.
 
 | Property | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `strategy` | No | `"auto"` | Lookup strategy |
-| `pattern` | No | `"Fuel_{Subtype}_20XX_{GHG}"` | Pattern to construct EF_ID |
-| `sectorFilter` | No | (none) | Filter EFID table by sector |
+| `sectorFilter` | No | (none) | Filter EFID table by sector before joining |
 
-### Pattern Placeholders
-
-| Placeholder | Replaced With | Example |
-|-------------|---------------|---------|
-| `{Subtype}` | Value from `Subtype` column | `Gasoline`, `Diesel`, `PSE` |
-| `{GHG}` | Value from `GHG` column | `CO2`, `CH4`, `N2O` |
-| `{Year}` | Value from `Year` column | `2022` |
-| `{Sector}` | Value from `Sector` column | `Fleet`, `Facilities` |
-
-### Common Patterns
-
-| Data Type | Pattern | Example Output |
-|-----------|---------|----------------|
-| Fleet Fuel | `Fuel_{Subtype}_20XX_{GHG}` | `Fuel_Gasoline_20XX_CO2` |
-| Electricity (PSE) | `Elec_PSE_{Year}_{GHG}` | `Elec_PSE_2022_CO2` |
-| Electricity (SCL) | `Elec_SCL_{Year}_{GHG}` | `Elec_SCL_2022_CO2` |
-| Natural Gas | `NG_{Subtype}_{GHG}` | `NG_Pipeline_CO2` |
-| Refrigerants | `FacAC_{Subtype}_20XX` | `FacAC_R-134A_20XX` |
+**Note:** The `EF_ID` column itself is now defined in `columnMappings` (see [Pattern-Based Column Construction](#6-pattern-based-column-construction-pattern)). The `efidLookup` config only controls the emission factor join behavior.
 
 ---
 
 ## Complete Request Examples
 
-### Example 1: Fleet Fuel Data
+### Example 1: Fleet Fuel Data (EF_ID from pattern)
 
 ```json
 POST /api/sessions/sess_a1b2c3/sources/fleetfuel_2019_2022/config
@@ -676,6 +946,9 @@ POST /api/sessions/sess_a1b2c3/sources/fleetfuel_2019_2022/config
     "GHG": {
       "ghgType": ["CO2", "CH4", "N2O"]
     },
+    "EF_ID": {
+      "pattern": "Fuel_{Subtype}_20XX_{GHG}"
+    },
     "LowOrg": {
       "sourceColumn": "DEPT_DEPT_CODE"
     },
@@ -707,13 +980,12 @@ POST /api/sessions/sess_a1b2c3/sources/fleetfuel_2019_2022/config
   ],
 
   "efidLookup": {
-    "pattern": "Fuel_{Subtype}_20XX_{GHG}",
     "sectorFilter": "Fleet"
   }
 }
 ```
 
-### Example 2: PSE Electricity Data
+### Example 2: PSE Electricity Data (EF_ID with Year)
 
 ```json
 POST /api/sessions/sess_a1b2c3/sources/pse_2022/config
@@ -746,6 +1018,9 @@ POST /api/sessions/sess_a1b2c3/sources/pse_2022/config
     "GHG": {
       "ghgType": ["CO2", "CH4", "N2O"]
     },
+    "EF_ID": {
+      "pattern": "Elec_PSE_{Year}_{GHG}"
+    },
     "LowOrg": {
       "sourceColumn": "Dept_Code"
     },
@@ -766,7 +1041,6 @@ POST /api/sessions/sess_a1b2c3/sources/pse_2022/config
   ],
 
   "efidLookup": {
-    "pattern": "Elec_PSE_{Year}_{GHG}",
     "sectorFilter": "Facilities"
   }
 }
@@ -799,15 +1073,109 @@ POST /api/sessions/sess_a1b2c3/sources/ac_facilities/config
     },
     "GHG": {
       "ghgType": ["R-134A"]
+    },
+    "EF_ID": {
+      "pattern": "FacAC_{Subtype}_20XX"
     }
   },
 
   "efidLookup": {
-    "pattern": "FacAC_{Subtype}_20XX",
     "sectorFilter": "Facilities"
   }
 }
 ```
+
+### Example 4: Data with Existing EF_ID Column
+
+If your source data already has a complete EF_ID column (including GHG suffix):
+
+```json
+POST /api/sessions/sess_a1b2c3/sources/preprocessed_data/config
+
+{
+  "columnMappings": {
+    "ACCT_ID": {
+      "sourceColumn": "Account_ID"
+    },
+    "Consumption": {
+      "sourceColumn": "Usage_Amount"
+    },
+    "Subtype": {
+      "sourceColumn": "Fuel_Type"
+    },
+    "Year": {
+      "sourceColumn": "Report_Year"
+    },
+    "Unit": {
+      "sourceColumn": "Usage_Unit"
+    },
+    "Sector": {
+      "sourceColumn": "Business_Sector"
+    },
+    "GHG": {
+      "ghgType": ["CO2", "CH4", "N2O"]
+    },
+    "EF_ID": {
+      "sourceColumn": "Emission_Factor_ID"
+    }
+  }
+}
+```
+
+### Example 5: Concatenate Source EFID Column with GHG
+
+If your source data has a **partial** EF_ID column (e.g., `"Fuel_Gasoline_20XX"`) and you need to append the GHG suffix:
+
+**Source data example:**
+| EFID_Base | Fuel_Type | QTY |
+|-----------|-----------|-----|
+| Fuel_Gasoline_20XX | Gasoline | 100 |
+| Fuel_Diesel_20XX | Diesel | 50 |
+
+**Desired EF_ID output:** `Fuel_Gasoline_20XX_CO2`, `Fuel_Gasoline_20XX_CH4`, etc.
+
+```json
+POST /api/sessions/sess_a1b2c3/sources/partial_efid_data/config
+
+{
+  "columnMappings": {
+    "ACCT_ID": {
+      "sourceColumn": "Account_ID"
+    },
+    "Consumption": {
+      "sourceColumn": "QTY"
+    },
+    "Subtype": {
+      "sourceColumn": "Fuel_Type"
+    },
+    "Year": {
+      "sourceColumn": "Report_Year"
+    },
+    "Unit": {
+      "staticValue": "gal"
+    },
+    "Sector": {
+      "staticValue": "Fleet"
+    },
+    "GHG": {
+      "ghgType": ["CO2", "CH4", "N2O"]
+    },
+    "EF_ID": {
+      "pattern": "{EFID_Base}_{GHG}"
+    }
+  }
+}
+```
+
+**How it works:**
+1. `EFID_Base` is read directly from the source column (e.g., `"Fuel_Gasoline_20XX"`)
+2. GHG expansion creates 3 rows per input with `GHG` = `"CO2"`, `"CH4"`, `"N2O"`
+3. The pattern `{EFID_Base}_{GHG}` combines them into:
+   - `Fuel_Gasoline_20XX_CO2`
+   - `Fuel_Gasoline_20XX_CH4`
+   - `Fuel_Gasoline_20XX_N2O`
+
+**Note:** Since the pattern contains `{GHG}`, it is automatically deferred until after GHG expansion, so the GHG values are available when constructing EF_ID.
 
 ---
 
@@ -840,6 +1208,7 @@ POST /api/sessions/sess_a1b2c3/sources/ac_facilities/config
 | `SESSION_NOT_FOUND` | 404 | Session does not exist |
 | `CONFIG_NOT_FOUND` | 404 | No config saved for source |
 | `NO_DATA` | 404 | No calculated data available |
+| `MISSING_EF_ID` | 422 | EF_ID column missing after mapping (ensure EF_ID is in columnMappings) |
 | `MISSING_EMISSION_FACTOR` | 422 | EF_ID not found in EFID table |
 | `MISSING_GWP` | 422 | GWP value not found for GHG |
 | `CALCULATION_ERROR` | 422/500 | Error during calculation |
@@ -856,6 +1225,7 @@ POST /api/sessions/sess_a1b2c3/sources/ac_facilities/config
     "details": {
       "errors": [
         "Missing required column mapping: 'ACCT_ID'",
+        "Missing required column mapping: 'EF_ID'",
         "Source column 'INVALID_COLUMN' does not exist in raw data",
         "Reference table not found: data/raw/REFERENCE/Missing.xlsx"
       ]
@@ -864,6 +1234,10 @@ POST /api/sessions/sess_a1b2c3/sources/ac_facilities/config
   }
 }
 ```
+
+**Note:** `EF_ID` is a required column. You must map it either:
+- Using `sourceColumn` if your data already has an EF_ID column
+- Using `pattern` to construct it (e.g., `"Fuel_{Subtype}_20XX_{GHG}"`)
 
 ---
 
@@ -916,13 +1290,13 @@ const config = await apiCall(`/sessions/${session.sessionId}/sources/fleet_fuel/
       Year: { derivedFrom: 'FTK_DATE', extractType: 'year' },
       Unit: { staticValue: 'gal' },
       Sector: { staticValue: 'Fleet' },
-      GHG: { ghgType: ['CO2', 'CH4', 'N2O'] }
+      GHG: { ghgType: ['CO2', 'CH4', 'N2O'] },
+      EF_ID: { pattern: 'Fuel_{Subtype}_20XX_{GHG}' }  // Required: construct from pattern
     },
     filters: [
       { column: 'QTY_FUEL', operator: '>', value: 0 }
     ],
     efidLookup: {
-      pattern: 'Fuel_{Subtype}_20XX_{GHG}',
       sectorFilter: 'Fleet'
     }
   })

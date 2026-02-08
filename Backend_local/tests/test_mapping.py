@@ -22,7 +22,7 @@ class TestDirectColumnMapping:
         mapping = {"ACCT_ID": {"sourceColumn": "EQ_EQUIP_NO"}}
 
         engine = MappingEngine()
-        result, _ = engine.map_columns(df, mapping)
+        result, _, _ = engine.map_columns(df, mapping)
 
         assert "ACCT_ID" in result.columns
         assert result["ACCT_ID"].iloc[0] == "1011"
@@ -43,7 +43,7 @@ class TestDirectColumnMapping:
         }
 
         engine = MappingEngine()
-        result, _ = engine.map_columns(df, mapping)
+        result, _, _ = engine.map_columns(df, mapping)
 
         assert "ACCT_ID" in result.columns
         assert "Consumption" in result.columns
@@ -60,7 +60,7 @@ class TestStaticValueMapping:
         mapping = {"Unit": {"staticValue": "gal"}}
 
         engine = MappingEngine()
-        result, _ = engine.map_columns(df, mapping)
+        result, _, _ = engine.map_columns(df, mapping)
 
         assert result["Unit"].iloc[0] == "gal"
         assert result["Unit"].iloc[1] == "gal"
@@ -72,7 +72,7 @@ class TestStaticValueMapping:
         mapping = {"GWP": {"staticValue": 28}}
 
         engine = MappingEngine()
-        result, _ = engine.map_columns(df, mapping)
+        result, _, _ = engine.map_columns(df, mapping)
 
         assert result["GWP"].iloc[0] == 28
 
@@ -86,7 +86,7 @@ class TestDerivedValueMapping:
         mapping = {"Year": {"derivedFrom": "FTK_DATE", "extractType": "year"}}
 
         engine = MappingEngine()
-        result, _ = engine.map_columns(df, mapping)
+        result, _, _ = engine.map_columns(df, mapping)
 
         assert result["Year"].iloc[0] == 2021
         assert result["Year"].iloc[1] == 2022
@@ -98,7 +98,7 @@ class TestDerivedValueMapping:
         mapping = {"Month": {"derivedFrom": "FTK_DATE", "extractType": "month"}}
 
         engine = MappingEngine()
-        result, _ = engine.map_columns(df, mapping)
+        result, _, _ = engine.map_columns(df, mapping)
 
         assert result["Month"].iloc[0] == 10
         assert result["Month"].iloc[1] == 3
@@ -109,7 +109,7 @@ class TestDerivedValueMapping:
         mapping = {"Day": {"derivedFrom": "FTK_DATE", "extractType": "day"}}
 
         engine = MappingEngine()
-        result, _ = engine.map_columns(df, mapping)
+        result, _, _ = engine.map_columns(df, mapping)
 
         assert result["Day"].iloc[0] == 15
         assert result["Day"].iloc[1] == 20
@@ -120,7 +120,7 @@ class TestDerivedValueMapping:
         mapping = {"Quarter": {"derivedFrom": "FTK_DATE", "extractType": "quarter"}}
 
         engine = MappingEngine()
-        result, _ = engine.map_columns(df, mapping)
+        result, _, _ = engine.map_columns(df, mapping)
 
         assert result["Quarter"].iloc[0] == 1
         assert result["Quarter"].iloc[1] == 2
@@ -222,6 +222,95 @@ class TestAggregation:
         # ACCT_ID 1012 should have 20.0
         row_1012 = result[result["ACCT_ID"] == "1012"]
         assert abs(row_1012["Consumption"].iloc[0] - 20.0) < 0.001
+
+
+class TestPatternMapping:
+    """Tests for pattern-based column construction."""
+
+    def test_pattern_without_ghg(self):
+        """Test pattern construction that doesn't use GHG."""
+        df = pd.DataFrame({
+            "FUEL_TYPE": ["Gasoline", "Diesel"],
+            "YEAR": [2021, 2022]
+        })
+        mapping = {
+            "Subtype": {"sourceColumn": "FUEL_TYPE"},
+            "Year": {"sourceColumn": "YEAR"},
+            "EF_ID": {"pattern": "Fuel_{Subtype}_{Year}"}
+        }
+
+        engine = MappingEngine()
+        result, _, deferred = engine.map_columns(df, mapping)
+
+        # Pattern without GHG should be processed immediately
+        assert len(deferred) == 0
+        assert "EF_ID" in result.columns
+        assert result["EF_ID"].iloc[0] == "Fuel_Gasoline_2021"
+        assert result["EF_ID"].iloc[1] == "Fuel_Diesel_2022"
+
+    def test_pattern_with_ghg_is_deferred(self):
+        """Test that patterns containing {GHG} are deferred."""
+        df = pd.DataFrame({
+            "FUEL_TYPE": ["Gasoline"],
+            "YEAR": [2021]
+        })
+        mapping = {
+            "Subtype": {"sourceColumn": "FUEL_TYPE"},
+            "Year": {"sourceColumn": "YEAR"},
+            "EF_ID": {"pattern": "Fuel_{Subtype}_20XX_{GHG}"}
+        }
+
+        engine = MappingEngine()
+        result, _, deferred = engine.map_columns(df, mapping)
+
+        # Pattern with GHG should be deferred
+        assert "EF_ID" in deferred
+        assert deferred["EF_ID"] == "Fuel_{Subtype}_20XX_{GHG}"
+        assert "EF_ID" not in result.columns  # Not processed yet
+
+    def test_deferred_pattern_applied_after_ghg_expansion(self):
+        """Test full pipeline with deferred GHG pattern."""
+        df = pd.DataFrame({
+            "FUEL_TYPE": ["Gasoline"],
+            "QTY": [100.0]
+        })
+        config = {
+            "columnMappings": {
+                "Subtype": {"sourceColumn": "FUEL_TYPE"},
+                "Consumption": {"sourceColumn": "QTY"},
+                "EF_ID": {"pattern": "Fuel_{Subtype}_20XX_{GHG}"},
+                "GHG": {"ghgType": ["CO2", "CH4", "N2O"]}
+            }
+        }
+
+        engine = MappingEngine()
+        result = engine.process_mappings(df, config)
+
+        # Should have 3 rows (one per GHG)
+        assert len(result) == 3
+
+        # Each row should have unique EF_ID with correct GHG
+        ef_ids = result["EF_ID"].tolist()
+        assert "Fuel_Gasoline_20XX_CO2" in ef_ids
+        assert "Fuel_Gasoline_20XX_CH4" in ef_ids
+        assert "Fuel_Gasoline_20XX_N2O" in ef_ids
+
+    def test_apply_deferred_patterns(self):
+        """Test apply_deferred_patterns method directly."""
+        df = pd.DataFrame({
+            "Subtype": ["Gasoline", "Diesel"],
+            "GHG": ["CO2", "CH4"],
+            "Year": [2021, 2022]
+        })
+        deferred = {
+            "EF_ID": "Fuel_{Subtype}_20XX_{GHG}"
+        }
+
+        result = MappingEngine.apply_deferred_patterns(df, deferred)
+
+        assert "EF_ID" in result.columns
+        assert result["EF_ID"].iloc[0] == "Fuel_Gasoline_20XX_CO2"
+        assert result["EF_ID"].iloc[1] == "Fuel_Diesel_20XX_CH4"
 
 
 class TestFilters:

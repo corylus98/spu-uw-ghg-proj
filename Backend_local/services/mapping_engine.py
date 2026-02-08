@@ -73,7 +73,7 @@ class MappingEngine:
         self,
         df: pd.DataFrame,
         column_mappings: dict,
-    ) -> tuple[pd.DataFrame, Optional[dict]]:
+    ) -> tuple[pd.DataFrame, Optional[dict], dict]:
         """
         Map raw columns to standard schema based on user configuration.
 
@@ -82,10 +82,15 @@ class MappingEngine:
             column_mappings: Dictionary of column mapping configurations
 
         Returns:
-            Tuple of (DataFrame with mapped columns, GHG config if present)
+            Tuple of (DataFrame with mapped columns, GHG config if present, deferred patterns)
+            Deferred patterns are patterns containing {GHG} that must be processed after GHG expansion.
         """
+        import re
+
         df_mapped = pd.DataFrame(index=df.index)
         ghg_config = None
+        pattern_mappings = {}  # Store pattern mappings for second pass
+        deferred_patterns = {}  # Patterns with {GHG} - process after GHG expansion
 
         for target_column, mapping in column_mappings.items():
             # Handle GHG expansion separately
@@ -145,10 +150,94 @@ class MappingEngine:
                 # Map values
                 df_mapped[target_column] = df[source_key].map(lookup_dict)
 
+            # 5. Pattern-based column construction (combine multiple columns)
+            elif "pattern" in mapping:
+                pattern = mapping["pattern"]
+                # Check if pattern contains {GHG} - these must be deferred until after GHG expansion
+                if "{GHG}" in pattern:
+                    deferred_patterns[target_column] = pattern
+                else:
+                    # Store pattern config for second pass (after other columns are mapped)
+                    pattern_mappings[target_column] = pattern
+
             else:
                 raise ValueError(f"Invalid mapping configuration for column: {target_column}")
 
-        return df_mapped, ghg_config
+        # Second pass: Process non-GHG pattern-based mappings
+        # These can reference both source columns and already-mapped columns
+        for target_column, pattern in pattern_mappings.items():
+            # Find all placeholders in the pattern
+            placeholders = re.findall(r'\{(\w+)\}', pattern)
+
+            # Build the column by replacing placeholders
+            def build_value(row_idx):
+                result = pattern
+                for placeholder in placeholders:
+                    # Try to get value from mapped columns first, then from source
+                    if placeholder in df_mapped.columns:
+                        value = df_mapped.loc[row_idx, placeholder]
+                    elif placeholder in df.columns:
+                        value = df.loc[row_idx, placeholder]
+                    else:
+                        value = placeholder  # Keep placeholder if not found
+                    # Convert to string and handle numeric types
+                    if pd.notna(value):
+                        if isinstance(value, float) and value.is_integer():
+                            value = int(value)
+                        result = result.replace(f"{{{placeholder}}}", str(value))
+                    else:
+                        result = result.replace(f"{{{placeholder}}}", "")
+                return result
+
+            df_mapped[target_column] = [build_value(idx) for idx in df_mapped.index]
+
+        return df_mapped, ghg_config, deferred_patterns
+
+    @staticmethod
+    def apply_deferred_patterns(df: pd.DataFrame, deferred_patterns: dict) -> pd.DataFrame:
+        """
+        Apply pattern-based column construction that was deferred until after GHG expansion.
+
+        These patterns contain {GHG} which only exists after expand_ghg_rows() is called.
+
+        Args:
+            df: DataFrame with GHG column (after expansion)
+            deferred_patterns: Dict of target_column -> pattern string
+
+        Returns:
+            DataFrame with deferred pattern columns added
+        """
+        import re
+
+        if not deferred_patterns:
+            return df
+
+        df = df.copy()
+
+        for target_column, pattern in deferred_patterns.items():
+            # Find all placeholders in the pattern
+            placeholders = re.findall(r'\{(\w+)\}', pattern)
+
+            # Build the column by replacing placeholders
+            def build_value(row):
+                result = pattern
+                for placeholder in placeholders:
+                    if placeholder in df.columns:
+                        value = row[placeholder]
+                    else:
+                        value = placeholder  # Keep placeholder if not found
+                    # Convert to string and handle numeric types
+                    if pd.notna(value):
+                        if isinstance(value, float) and value.is_integer():
+                            value = int(value)
+                        result = result.replace(f"{{{placeholder}}}", str(value))
+                    else:
+                        result = result.replace(f"{{{placeholder}}}", "")
+                return result
+
+            df[target_column] = df.apply(build_value, axis=1)
+
+        return df
 
     @staticmethod
     def expand_ghg_rows(df: pd.DataFrame, ghg_config: Optional[dict]) -> pd.DataFrame:
@@ -214,7 +303,7 @@ class MappingEngine:
         config: dict,
     ) -> pd.DataFrame:
         """
-        Apply full mapping pipeline: filters -> map -> expand -> aggregate.
+        Apply full mapping pipeline: filters -> map -> expand -> deferred patterns -> aggregate.
 
         Args:
             df: Raw DataFrame
@@ -227,14 +316,17 @@ class MappingEngine:
         filters = config.get("filters", [])
         df_filtered = self.apply_filters(df, filters)
 
-        # 2. Map columns
-        df_mapped, ghg_config = self.map_columns(df_filtered, config["columnMappings"])
+        # 2. Map columns (patterns with {GHG} are deferred)
+        df_mapped, ghg_config, deferred_patterns = self.map_columns(df_filtered, config["columnMappings"])
 
-        # 3. Expand GHG rows
+        # 3. Expand GHG rows (creates GHG column)
         df_expanded = self.expand_ghg_rows(df_mapped, ghg_config)
 
-        # 4. Aggregate consumption
-        df_aggregated = self.aggregate_consumption(df_expanded)
+        # 4. Apply deferred patterns (those containing {GHG})
+        df_with_patterns = self.apply_deferred_patterns(df_expanded, deferred_patterns)
+
+        # 5. Aggregate consumption
+        df_aggregated = self.aggregate_consumption(df_with_patterns)
 
         return df_aggregated
 
