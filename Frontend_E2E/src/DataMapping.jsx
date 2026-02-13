@@ -296,7 +296,7 @@ function ConfigModal({ fieldName, sourceColumns, mapping, onSave, onClose, isOpt
               </label>
               {fillType === 'ghg' && (
                 <div className="flex flex-col gap-[4px] ml-[20px]">
-                  {['CO2', 'CH4', 'N2O'].map(gas => (
+                  {['CO2', 'CH4', 'N2O', 'CO2e', 'SF6', 'R-22', 'R-404A', 'R-407C', 'R-410A', 'R-134A'].map(gas => (
                     <label key={gas} className="flex items-center gap-[6px] cursor-pointer">
                       <input
                         type="checkbox"
