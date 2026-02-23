@@ -2,7 +2,13 @@
 
 This guide explains how to use the EcoMetrics Backend API, with detailed examples for column mappings and all endpoints.
 
-**Base URL**: `http://localhost:8000/api`
+**Base URL (Cloud)**: Configured via `REACT_APP_API_URL` environment variable in the frontend.
+- Development: set in `Frontend_cloud/.env.development.local`
+- Production: set in `Frontend_cloud/.env.production`
+
+Example: `REACT_APP_API_URL=http://18.219.197.123:8000/api`
+
+If the variable is not set, the frontend falls back to `http://localhost:8000/api`.
 
 ---
 
@@ -14,6 +20,8 @@ This guide explains how to use the EcoMetrics Backend API, with detailed example
 4. [Filter Configuration](#filter-configuration)
 5. [Complete Request Examples](#complete-request-examples)
 6. [Error Handling](#error-handling)
+
+> **Cloud Note:** In cloud mode, all files (uploads and reference data) are stored in AWS S3, not on the server's local disk. The `filePath` field in API responses will be in `s3://bucket/key` format.
 
 ---
 
@@ -57,19 +65,52 @@ This section describes the typical user journey through the EcoMetrics system an
 
 ---
 
+### Step 0: Upload a Source File (Cloud Mode)
+
+**Purpose:** User uploads a local CSV or Excel file to S3 so the backend can process it.
+
+| Action | API Endpoint | Description |
+|--------|--------------|-------------|
+| Upload file | `POST /api/files/upload` | Uploads file to S3 and returns a `sourceId` |
+
+**Request:** `multipart/form-data`
+- `file`: the File object from the browser file input
+- `folder`: `"CONSUMPTION"` or `"REFERENCE"`
+
+**Response:**
+```json
+{
+  "success": true,
+  "sourceId": "pse_data_2022",
+  "name": "PSE_Data_2022",
+  "fileName": "PSE_Data_2022.xlsx",
+  "folder": "CONSUMPTION",
+  "sheets": ["Sheet1", "Data"]
+}
+```
+
+**Important:**
+- Store the returned `sourceId` — it is used to reference the file in all subsequent API calls (`preview`, `saveSourceConfig`, `calculate`)
+- The `sheets` field is only present for Excel files; null for CSV
+- In cloud mode, the file is stored in `s3://spu-emissions-raw-data/{folder}/{filename}`
+
+---
+
 ### Step 1: Browse Source Files (First-Time User)
 
 **Purpose:** User explores available data files to decide which to work with.
 
 | Action | API Endpoint | Description |
 |--------|--------------|-------------|
-| List all source files | `GET /api/sources` | Returns list of CSV/XLSX files in the data directory |
+| List all source files | `GET /api/sources` | Returns list of CSV/XLSX files from S3 |
 | Preview a source file | `GET /api/sources/{sourceId}/preview` | Returns column metadata and first 10 rows |
 
 **Typical Frontend Flow:**
 1. Display list of available source files with file names and sizes
 2. When user clicks a file, show column names, data types, and sample values
 3. User decides which file(s) to use for emissions calculation
+
+**Cloud Note:** In cloud mode, `filePath` in the response is an S3 URI (e.g., `s3://spu-emissions-raw-data/CONSUMPTION/PSE_Data_2022.xlsx`), not a local path.
 
 ---
 
@@ -205,6 +246,7 @@ This section describes the typical user journey through the EcoMetrics system an
 
 | Step | User Action | API Call |
 |------|-------------|----------|
+| 0 | Upload file to S3 | `POST /api/files/upload` |
 | 1a | Browse files | `GET /api/sources` |
 | 1b | Preview file | `GET /api/sources/{sourceId}/preview?sheet=Sheet1` |
 | 2 | Create session | `POST /api/sessions` |
@@ -221,7 +263,61 @@ This section describes the typical user journey through the EcoMetrics system an
 
 ## API Endpoints
 
-### 1. Health Check
+### 1. Upload File
+
+```http
+POST /api/files/upload
+Content-Type: multipart/form-data
+```
+
+**Form Fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `file` | Yes | File object (`.csv`, `.xlsx`, `.xls`) |
+| `folder` | No | `"CONSUMPTION"` (default) or `"REFERENCE"` |
+
+**Response (HTTP 201):**
+```json
+{
+  "success": true,
+  "sourceId": "pse_data_2022",
+  "name": "PSE_Data_2022",
+  "fileName": "PSE_Data_2022.xlsx",
+  "folder": "CONSUMPTION",
+  "sheets": ["Sheet1", "Data"]
+}
+```
+
+**JavaScript example:**
+```js
+async function uploadFile(file, folder) {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('folder', folder); // "CONSUMPTION" or "REFERENCE"
+
+  const response = await fetch(`${API_BASE_URL}/files/upload`, {
+    method: 'POST',
+    body: formData,
+    // Do NOT set Content-Type — browser sets it automatically with correct boundary
+  });
+  const data = await response.json();
+  if (!data.success) throw new Error(data.error?.message || 'Upload failed');
+  return data; // { sourceId, name, fileName, folder, sheets }
+}
+```
+
+**Error codes:**
+| Code | HTTP | Cause |
+|------|------|-------|
+| `MISSING_PARAMETER` | 400 | No file in request |
+| `INVALID_PARAMETER` | 400 | folder not CONSUMPTION or REFERENCE |
+| `INVALID_FILE_TYPE` | 400 | File extension not .csv/.xlsx/.xls |
+| `STORAGE_ERROR` | 500 | S3 write failed |
+
+---
+
+### 2. Health Check
 
 ```http
 GET /api/health
@@ -252,7 +348,7 @@ GET /api/sources
     {
       "sourceId": "fleetfuel_2019_2022",
       "name": "FleetFuel_2019-2022",
-      "filePath": "data/raw/CONSUMPTION/FleetFuel_2019-2022.xlsx",
+      "filePath": "s3://spu-emissions-raw-data/CONSUMPTION/FleetFuel_2019-2022.xlsx",
       "fileSize": 1850000,
       "lastModified": "2026-01-15T10:30:00Z",
       "sheets": ["Sheet1", "Data"]
