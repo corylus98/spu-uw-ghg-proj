@@ -10,15 +10,13 @@ The API base URL is controlled by an environment variable. You must set it befor
 
 **For local development** — create or edit `Frontend_cloud/.env.development.local`:
 ```
-REACT_APP_API_URL=http://18.219.197.123:8000/api
+REACT_APP_API_URL=http://spu-emissions-alb-2072572789.us-east-2.elb.amazonaws.com/api
 ```
 
 **For production builds** — edit `Frontend_cloud/.env.production`:
 ```
-REACT_APP_API_URL=http://18.219.197.123:8000/api
+REACT_APP_API_URL=http://spu-emissions-alb-2072572789.us-east-2.elb.amazonaws.com/api
 ```
-
-> The IP changes every time the ECS task is redeployed. Update both files with the new IP when that happens.
 
 If `REACT_APP_API_URL` is not set, the app falls back to `http://localhost:8000/api` (local backend).
 
