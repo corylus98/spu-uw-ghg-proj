@@ -6,9 +6,9 @@ This guide explains how to use the EcoMetrics Backend API, with detailed example
 - Development: set in `Frontend_cloud/.env.development.local`
 - Production: set in `Frontend_cloud/.env.production`
 
-Example: `REACT_APP_API_URL=http://18.219.197.123:8000/api`
+Example: `REACT_APP_API_URL=http://spu-emissions-alb-2072572789.us-east-2.elb.amazonaws.com/api`
 
-If the variable is not set, the frontend falls back to `http://localhost:8000/api`.
+If the variable is not set, the frontend falls back to `http://spu-emissions-alb-2072572789.us-east-2.elb.amazonaws.com/api`.
 
 ---
 
@@ -1321,7 +1321,7 @@ POST /api/sessions/sess_a1b2c3/sources/partial_efid_data/config
 ### Fetch Wrapper
 
 ```typescript
-const API_BASE = 'http://localhost:8000/api';
+const API_BASE = 'http://spu-emissions-alb-2072572789.us-east-2.elb.amazonaws.com/api';
 
 async function apiCall<T>(
   endpoint: string,

@@ -16,7 +16,7 @@ class Config:
     # --- S3 configuration (only used when STORAGE_BACKEND=s3) ---
     S3_RAW_BUCKET = os.getenv("S3_RAW_BUCKET", "spu-emissions-raw-data")
     S3_DATA_BUCKET = os.getenv("S3_DATA_BUCKET", "spu-emissions-processed-data")
-    AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "us-west-2")
+    AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-2")
 
     # S3 key prefixes
     S3_CONSUMPTION_PREFIX = "CONSUMPTION/"
