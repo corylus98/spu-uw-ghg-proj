@@ -1,5 +1,5 @@
 // src/services/api.js
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://spu-emissions-alb-2072572789.us-east-2.elb.amazonaws.com/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://ecometrics-api.adc.seattle.gov/api';
 
 /**
  * GET /api/health

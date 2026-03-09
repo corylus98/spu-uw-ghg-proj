@@ -22,7 +22,10 @@ def create_app() -> Flask:
     Config.ensure_directories()
 
     # Configure CORS
-    CORS(app, origins=Config.CORS_ORIGINS)
+    CORS(app, origins=[
+    "http://localhost:3000",
+    "https://main.xxxxxxxxx.amplifyapp.com"
+    ])
 
     # Configure logging
     setup_logging()

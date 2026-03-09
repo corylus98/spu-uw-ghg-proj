@@ -10,12 +10,12 @@ The API base URL is controlled by an environment variable. You must set it befor
 
 **For local development** — create or edit `Frontend_cloud/.env.development.local`:
 ```
-REACT_APP_API_URL=http://spu-emissions-alb-2072572789.us-east-2.elb.amazonaws.com/api
+REACT_APP_API_URL=https://ecometrics-api.adc.seattle.gov/api
 ```
 
 **For production builds** — edit `Frontend_cloud/.env.production`:
 ```
-REACT_APP_API_URL=http://spu-emissions-alb-2072572789.us-east-2.elb.amazonaws.com/api
+REACT_APP_API_URL=https://ecometrics-api.adc.seattle.gov/api
 ```
 
 If `REACT_APP_API_URL` is not set, the app falls back to `http://localhost:8000/api` (local backend).
