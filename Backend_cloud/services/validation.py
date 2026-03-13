@@ -160,6 +160,15 @@ class ValidationService:
             if filter_config.get("operator") not in ["is_null", "not_null"] and "value" not in filter_config:
                 errors.append(f"Filter {i} missing 'value' field")
 
+        # Validate dataOverrides (optional — warnings only, never block calculation)
+        data_overrides = config.get("dataOverrides", [])
+        for i, override in enumerate(data_overrides):
+            col = override.get("column")
+            if col and col not in source_columns:
+                warnings.append(
+                    f"Override {i} references unknown column '{col}' — will be skipped"
+                )
+
         # Validate EFID lookup config
         efid_lookup = config.get("efidLookup", {})
         if efid_lookup:

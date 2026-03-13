@@ -18,8 +18,9 @@ If the variable is not set, the frontend falls back to `https://ecometrics-api.a
 2. [API Endpoints](#api-endpoints)
 3. [Column Mapping Rules (Detailed)](#column-mapping-rules-detailed)
 4. [Filter Configuration](#filter-configuration)
-5. [Complete Request Examples](#complete-request-examples)
-6. [Error Handling](#error-handling)
+5. [Data Override Configuration](#data-override-configuration)
+6. [Complete Request Examples](#complete-request-examples)
+7. [Error Handling](#error-handling)
 
 > **Cloud Note:** In cloud mode, all files (uploads and reference data) are stored in AWS S3, not on the server's local disk. The `filePath` field in API responses will be in `s3://bucket/key` format.
 
@@ -984,6 +985,91 @@ Filters are applied to raw data **before** column mapping.
 
 ---
 
+## Data Override Configuration
+
+`dataOverrides` allows cell-level corrections collected during the **Data Cleaning** step to be persisted in the session config and applied to the raw data before any filters or column mappings run.
+
+This field is **optional**. If the user made no corrections, omit it entirely.
+
+### Structure
+
+```json
+{
+  "dataOverrides": [
+    { "rowIndex": 5,  "column": "QTY_FUEL",   "value": "25.5" },
+    { "rowIndex": 12, "column": "FUEL_TYPE",   "value": "Diesel" },
+    { "rowIndex": 87, "column": "EQ_EQUIP_NO", "value": "1042" }
+  ]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `rowIndex` | integer | Yes | 0-indexed row number in the raw data file (header row excluded), matching the row the user edited in the UI |
+| `column` | string | Yes | Exact column name in the raw source file |
+| `value` | string | Yes | Replacement value (always sent as a string; backend coerces to the column's native type during processing) |
+
+### Processing Order
+
+Overrides are applied **first**, before anything else:
+
+```
+Raw data loaded
+  → dataOverrides applied   ← user corrections from cleaning step
+  → filters applied
+  → column mappings applied
+  → GHG expansion
+  → aggregation
+  → emission factor lookup
+  → GWP lookup
+  → mtCO2e calculation
+```
+
+### Validation Behaviour
+
+- If a `column` value does not exist in the source file, the override is **skipped** and a warning is returned in the config save response — it does **not** block calculation.
+- Out-of-range `rowIndex` values are silently ignored.
+
+### Example: Correcting Missing and Incorrect Values
+
+A user opened FleetFuel data in the cleaning step and fixed three cells:
+
+```json
+POST /api/sessions/sess_a1b2c3/sources/fleetfuel_2019_2022/config
+
+{
+  "sourceId": "fleetfuel_2019_2022",
+  "columnMappings": {
+    "ACCT_ID":     { "sourceColumn": "EQ_EQUIP_NO" },
+    "Consumption": { "sourceColumn": "QTY_FUEL" },
+    "Subtype":     { "sourceColumn": "FUEL_TYPE" },
+    "Year":        { "derivedFrom": "FTK_DATE", "extractType": "year" },
+    "Unit":        { "staticValue": "gal" },
+    "Sector":      { "staticValue": "Fleet" },
+    "GHG":         { "ghgType": ["CO2", "CH4", "N2O"] },
+    "EF_ID":       { "pattern": "Fuel_{Subtype}_20XX_{GHG}" }
+  },
+  "filters": [
+    { "column": "QTY_FUEL", "operator": ">", "value": 0 }
+  ],
+  "efidLookup": {
+    "pattern": "Fuel_{Subtype}_20XX_{GHG}",
+    "sectorFilter": "Fleet"
+  },
+  "dataOverrides": [
+    { "rowIndex": 5,  "column": "QTY_FUEL",   "value": "25.5"  },
+    { "rowIndex": 12, "column": "FUEL_TYPE",   "value": "Diesel" },
+    { "rowIndex": 87, "column": "EQ_EQUIP_NO", "value": "1042"  }
+  ]
+}
+```
+
+- Row 5: `QTY_FUEL` was blank — user filled in `25.5`
+- Row 12: `FUEL_TYPE` had an unrecognised value — user corrected to `Diesel`
+- Row 87: `EQ_EQUIP_NO` was missing — user filled in `1042`
+
+---
+
 ## Complete Request Examples
 
 ### Example 1: Fleet Fuel Data (EF_ID from pattern)
@@ -1251,6 +1337,103 @@ POST /api/sessions/sess_a1b2c3/sources/partial_efid_data/config
    - `Fuel_Gasoline_20XX_N2O`
 
 **Note:** Since the pattern contains `{GHG}`, it is automatically deferred until after GHG expansion, so the GHG values are available when constructing EF_ID.
+
+---
+
+### Example 6: Full Config — Column Mappings + Filters + Data Overrides
+
+This is a complete request combining all three configuration sections. The user uploaded fleet fuel data, applied filters to narrow the date range, and corrected three cells during the Data Cleaning step.
+
+```json
+POST /api/sessions/sess_a1b2c3/sources/fleetfuel_2019_2022/config
+
+{
+  "sourceSheet": "Sheet1",
+
+  "columnMappings": {
+    "ACCT_ID": {
+      "sourceColumn": "EQ_EQUIP_NO"
+    },
+    "Consumption": {
+      "sourceColumn": "QTY_FUEL"
+    },
+    "Subtype": {
+      "sourceColumn": "FUEL_TYPE"
+    },
+    "Year": {
+      "derivedFrom": "FTK_DATE",
+      "extractType": "year"
+    },
+    "Month": {
+      "derivedFrom": "FTK_DATE",
+      "extractType": "month"
+    },
+    "Unit": {
+      "staticValue": "gal"
+    },
+    "Sector": {
+      "staticValue": "Fleet"
+    },
+    "GHG": {
+      "ghgType": ["CO2", "CH4", "N2O"]
+    },
+    "EF_ID": {
+      "pattern": "Fuel_{Subtype}_20XX_{GHG}"
+    },
+    "LowOrg": {
+      "sourceColumn": "DEPT_DEPT_CODE"
+    },
+    "LOB": {
+      "referenceTable": "data/raw/REFERENCE/LOB_LowOrgList.xlsx",
+      "refKey": "LowOrg",
+      "sourceKey": "DEPT_DEPT_CODE",
+      "columnJoined": "LOB"
+    },
+    "Vehicle Location": {
+      "sourceColumn": "LOC_STATION_LOC"
+    }
+  },
+
+  "filters": [
+    {
+      "column": "FTK_DATE",
+      "operator": ">=",
+      "value": "2019-01-01"
+    },
+    {
+      "column": "FTK_DATE",
+      "operator": "<=",
+      "value": "2022-12-31"
+    },
+    {
+      "column": "QTY_FUEL",
+      "operator": ">",
+      "value": 0
+    }
+  ],
+
+  "efidLookup": {
+    "sectorFilter": "Fleet"
+  },
+
+  "dataOverrides": [
+    { "rowIndex": 5,  "column": "QTY_FUEL",   "value": "25.5"  },
+    { "rowIndex": 12, "column": "FUEL_TYPE",   "value": "Diesel" },
+    { "rowIndex": 87, "column": "EQ_EQUIP_NO", "value": "1042"  }
+  ]
+}
+```
+
+**What each section does:**
+
+- **`columnMappings`**: Maps raw source columns to the standard schema. Uses direct column references, static values, date extraction, GHG expansion, an EF_ID pattern, and a reference table join for LOB.
+- **`filters`**: Restricts rows to the 2019–2022 date range and excludes zero-quantity records.
+- **`dataOverrides`**: Applies three cell corrections made during Data Cleaning before any filters or mappings run:
+  - Row 5: `QTY_FUEL` was blank — filled in as `25.5`
+  - Row 12: `FUEL_TYPE` had an unrecognised value — corrected to `Diesel`
+  - Row 87: `EQ_EQUIP_NO` was missing — filled in as `1042`
+
+**Processing order:** `dataOverrides` → `filters` → `columnMappings` → GHG expansion → aggregation → EF_ID lookup → GWP lookup → mtCO2e calculation.
 
 ---
 

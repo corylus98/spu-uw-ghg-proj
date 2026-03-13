@@ -166,6 +166,7 @@ export default function App() {
         onLogoClick={handleLogoClick}
         folders={folders}
         fileColumnLabels={fileColumnLabels}
+        filePendingCorrections={filePendingCorrections}
       />
     );
   }

@@ -305,6 +305,32 @@ class MappingEngine:
 
         return df_aggregated
 
+    def apply_data_overrides(self, df: pd.DataFrame, overrides: list) -> pd.DataFrame:
+        """
+        Apply user-supplied cell-level corrections from the data cleaning step.
+
+        Each override targets a specific row (0-indexed) and column in the raw
+        DataFrame and replaces its value before any filters or mappings run.
+        Unknown column names or out-of-range row indices are silently skipped.
+
+        Args:
+            df: Raw DataFrame
+            overrides: List of dicts with keys 'rowIndex', 'column', 'value'
+
+        Returns:
+            DataFrame with corrections applied
+        """
+        if not overrides:
+            return df
+        df_out = df.copy()
+        for override in overrides:
+            row_idx = override.get("rowIndex")
+            column = override.get("column")
+            value = override.get("value")
+            if column in df_out.columns and row_idx is not None and row_idx < len(df_out):
+                df_out.at[row_idx, column] = value
+        return df_out
+
     def process_mappings(
         self,
         df: pd.DataFrame,
@@ -320,6 +346,9 @@ class MappingEngine:
         Returns:
             Processed DataFrame ready for emission factor lookup
         """
+        # 0. Apply data overrides (cell corrections from the cleaning step)
+        df = self.apply_data_overrides(df, config.get("dataOverrides", []))
+
         # 1. Apply filters
         filters = config.get("filters", [])
         df_filtered = self.apply_filters(df, filters)

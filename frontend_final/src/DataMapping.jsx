@@ -1308,6 +1308,8 @@ export default function DataMapping({
   onGoToStep,
   ensureSession,
   onLogoClick,
+  folders,
+  filePendingCorrections,
 }) {
   // Backend data state
   const [backendSources, setBackendSources] = useState([]);
@@ -1554,6 +1556,26 @@ export default function DataMapping({
       // If source has sheets, include the first sheet
       if (selectedSource?.sheets?.length > 0) {
         config.sourceSheet = selectedSource.sheets[0];
+      }
+
+      // Attach data cleaning corrections as dataOverrides
+      const allFiles = (folders || []).flatMap(f => f.files || []);
+      const matchedFile = allFiles.find(f => f.sourceId === selectedSourceId);
+      if (matchedFile && filePendingCorrections?.[matchedFile.id]) {
+        const corrections = filePendingCorrections[matchedFile.id];
+        const headers = matchedFile.content?.headers || [];
+        const dataOverrides = [];
+        for (const [rowIdx, colMap] of Object.entries(corrections)) {
+          for (const [colIdx, value] of Object.entries(colMap)) {
+            const colName = headers[parseInt(colIdx)];
+            if (colName) {
+              dataOverrides.push({ rowIndex: parseInt(rowIdx), column: colName, value });
+            }
+          }
+        }
+        if (dataOverrides.length > 0) {
+          config.dataOverrides = dataOverrides;
+        }
       }
 
       // Save config
