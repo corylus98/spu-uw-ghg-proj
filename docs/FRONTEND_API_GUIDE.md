@@ -996,9 +996,9 @@ This field is **optional**. If the user made no corrections, omit it entirely.
 ```json
 {
   "dataOverrides": [
-    { "rowIndex": 5,  "column": "QTY_FUEL",   "value": "25.5" },
+    { "rowIndex": 5,  "column": "QTY_FUEL",   "value": 25.5 }, 
     { "rowIndex": 12, "column": "FUEL_TYPE",   "value": "Diesel" },
-    { "rowIndex": 87, "column": "EQ_EQUIP_NO", "value": "1042" }
+    { "rowIndex": 87, "column": "EQ_EQUIP_NO", "value": 1042 }
   ]
 }
 ```
@@ -1057,15 +1057,15 @@ POST /api/sessions/sess_a1b2c3/sources/fleetfuel_2019_2022/config
     "sectorFilter": "Fleet"
   },
   "dataOverrides": [
-    { "rowIndex": 5,  "column": "QTY_FUEL",   "value": "25.5"  },
+    { "rowIndex": 5,  "column": "QTY_FUEL",   "value": 25.5  },
     { "rowIndex": 12, "column": "FUEL_TYPE",   "value": "Diesel" },
-    { "rowIndex": 87, "column": "EQ_EQUIP_NO", "value": "1042"  }
+    { "rowIndex": 87, "column": "EQ_EQUIP_NO", "value": 1042  }
   ]
 }
 ```
 
-- Row 5: `QTY_FUEL` was blank — user filled in `25.5`
-- Row 12: `FUEL_TYPE` had an unrecognised value — user corrected to `Diesel`
+- Row 5: `QTY_FUEL` was blank — user filled in `25.5` (int/float)
+- Row 12: `FUEL_TYPE` had an unrecognised value — user corrected to `Diesel` (string)
 - Row 87: `EQ_EQUIP_NO` was missing — user filled in `1042`
 
 ---
@@ -1417,9 +1417,9 @@ POST /api/sessions/sess_a1b2c3/sources/fleetfuel_2019_2022/config
   },
 
   "dataOverrides": [
-    { "rowIndex": 5,  "column": "QTY_FUEL",   "value": "25.5"  },
+    { "rowIndex": 5,  "column": "QTY_FUEL",   "value": 25.5  },
     { "rowIndex": 12, "column": "FUEL_TYPE",   "value": "Diesel" },
-    { "rowIndex": 87, "column": "EQ_EQUIP_NO", "value": "1042"  }
+    { "rowIndex": 87, "column": "EQ_EQUIP_NO", "value": 1042  }
   ]
 }
 ```
